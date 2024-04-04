@@ -73,9 +73,9 @@ class AsyncAwsS3Adapter implements FilesystemAdapter, PublicUrlGenerator, Checks
         'Tagging',
         'WebsiteRedirectLocation',
         'ChecksumAlgorithm',
-        'CopySSECustomerAlgorithm',
-        'CopySSECustomerKey',
-        'CopySSECustomerKeyMD5',
+        'CopySourceSSECustomerAlgorithm',
+        'CopySourceSSECustomerKey',
+        'CopySourceSSECustomerKeyMD5',
     ];
 
     /**
