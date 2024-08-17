@@ -307,6 +307,10 @@ class AsyncAwsS3Adapter implements FilesystemAdapter, PublicUrlGenerator, Checks
 
     public function move(string $source, string $destination, Config $config): void
     {
+        if ($source === $destination) {
+            return;
+        }
+
         try {
             $this->copy($source, $destination, $config);
             $this->delete($source);
@@ -317,8 +321,11 @@ class AsyncAwsS3Adapter implements FilesystemAdapter, PublicUrlGenerator, Checks
 
     public function copy(string $source, string $destination, Config $config): void
     {
-        try {
+        if ($source === $destination) {
+            return;
+        }
 
+        try {
             $visibility = $config->get(Config::OPTION_VISIBILITY);
 
             if ($visibility === null && $config->get(Config::OPTION_RETAIN_VISIBILITY, true)) {
