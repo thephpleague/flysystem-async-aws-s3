@@ -22,8 +22,10 @@ use League\Flysystem\FilesystemAdapter;
 use League\Flysystem\StorageAttributes;
 use League\Flysystem\UnableToCheckFileExistence;
 use League\Flysystem\UnableToDeleteFile;
+use League\Flysystem\UnableToListContents;
 use League\Flysystem\UnableToMoveFile;
 use League\Flysystem\UnableToRetrieveMetadata;
+use League\Flysystem\UnableToWriteFile;
 use League\Flysystem\Visibility;
 use function getenv;
 use function iterator_to_array;
@@ -327,6 +329,18 @@ class AsyncAwsS3AdapterTest extends FilesystemAdapterTestCase
     /**
      * @test
      */
+    public function failing_to_write_a_file(): void
+    {
+        $adapter = $this->adapter();
+        static::$stubS3Client->throwExceptionWhenExecutingCommand('PutObject');
+        $this->expectException(UnableToWriteFile::class);
+
+        $adapter->write('foo/bar.txt', 'contents', new Config());
+    }
+
+    /**
+     * @test
+     */
     public function moving_a_file_with_visibility(): void
     {
         $this->runScenario(function () {
@@ -390,6 +404,19 @@ class AsyncAwsS3AdapterTest extends FilesystemAdapterTestCase
             self::assertCount(0, $listing2);
             self::assertCount(1, $listing3);
         });
+    }
+
+    /**
+     * @test
+     */
+    public function failing_to_list_contents(): void
+    {
+        $adapter = $this->adapter();
+        static::$stubS3Client->throwExceptionWhenExecutingCommand('ListObjectsV2');
+
+        $this->expectException(UnableToListContents::class);
+
+        iterator_to_array($adapter->listContents('/path', false));
     }
 
     protected static function createFilesystemAdapter(): FilesystemAdapter

@@ -27,14 +27,18 @@ use League\Flysystem\StorageAttributes;
 use League\Flysystem\UnableToCheckDirectoryExistence;
 use League\Flysystem\UnableToCheckFileExistence;
 use League\Flysystem\UnableToCopyFile;
+use League\Flysystem\UnableToCreateDirectory;
+use League\Flysystem\UnableToDeleteDirectory;
 use League\Flysystem\UnableToDeleteFile;
 use League\Flysystem\UnableToGeneratePublicUrl;
 use League\Flysystem\UnableToGenerateTemporaryUrl;
+use League\Flysystem\UnableToListContents;
 use League\Flysystem\UnableToMoveFile;
 use League\Flysystem\UnableToProvideChecksum;
 use League\Flysystem\UnableToReadFile;
 use League\Flysystem\UnableToRetrieveMetadata;
 use League\Flysystem\UnableToSetVisibility;
+use League\Flysystem\UnableToWriteFile;
 use League\Flysystem\UrlGeneration\PublicUrlGenerator;
 use League\Flysystem\UrlGeneration\TemporaryUrlGenerator;
 use League\Flysystem\Visibility;
@@ -177,24 +181,29 @@ class AsyncAwsS3Adapter implements FilesystemAdapter, PublicUrlGenerator, Checks
 
         $objects = [];
         $params = ['Bucket' => $this->bucket, 'Prefix' => $prefix];
-        $result = $this->client->listObjectsV2($params);
-        /** @var AwsObject $item */
-        foreach ($result->getContents() as $item) {
-            $key = $item->getKey();
-            if (null !== $key) {
-                $objects[] = new ObjectIdentifier(['Key' => $key]);
+
+        try {
+            $result = $this->client->listObjectsV2($params);
+            /** @var AwsObject $item */
+            foreach ($result->getContents() as $item) {
+                $key = $item->getKey();
+                if (null !== $key) {
+                    $objects[] = new ObjectIdentifier(['Key' => $key]);
+                }
             }
-        }
 
-        if (empty($objects)) {
-            return;
-        }
+            if (empty($objects)) {
+                return;
+            }
 
-        foreach (array_chunk($objects, 1000) as $chunk) {
-            $this->client->deleteObjects([
-                'Bucket' => $this->bucket,
-                'Delete' => ['Objects' => $chunk],
-            ]);
+            foreach (array_chunk($objects, 1000) as $chunk) {
+                $this->client->deleteObjects([
+                    'Bucket' => $this->bucket,
+                    'Delete' => ['Objects' => $chunk],
+                ]);
+            }
+        } catch (\Throwable $e) {
+            throw UnableToDeleteDirectory::atLocation($path, $e->getMessage(), $e);
         }
     }
 
@@ -202,7 +211,12 @@ class AsyncAwsS3Adapter implements FilesystemAdapter, PublicUrlGenerator, Checks
     {
         $defaultVisibility = $config->get(Config::OPTION_DIRECTORY_VISIBILITY, $this->visibility->defaultForDirectories());
         $config = $config->withDefaults([Config::OPTION_VISIBILITY => $defaultVisibility]);
-        $this->upload(rtrim($path, '/') . '/', '', $config);
+
+        try {
+            $this->upload(rtrim($path, '/') . '/', '', $config);
+        } catch (Throwable $e) {
+            throw UnableToCreateDirectory::dueToFailure($path, $e);
+        }
     }
 
     public function setVisibility(string $path, string $visibility): void
@@ -292,16 +306,20 @@ class AsyncAwsS3Adapter implements FilesystemAdapter, PublicUrlGenerator, Checks
             $options['Delimiter'] = '/';
         }
 
-        $listing = $this->retrievePaginatedListing($options);
+        try {
+            $listing = $this->retrievePaginatedListing($options);
 
-        foreach ($listing as $item) {
-            $item = $this->mapS3ObjectMetadata($item);
+            foreach ($listing as $item) {
+                $item = $this->mapS3ObjectMetadata($item);
 
-            if ($item->path() === $path) {
-                continue;
+                if ($item->path() === $path) {
+                    continue;
+                }
+
+                yield $item;
             }
-
-            yield $item;
+        } catch (\Throwable $e) {
+            throw UnableToListContents::atLocation($path, $deep, $e);
         }
     }
 
@@ -363,16 +381,20 @@ class AsyncAwsS3Adapter implements FilesystemAdapter, PublicUrlGenerator, Checks
             $options['ContentType'] = $mimeType;
         }
 
-        if ($this->client instanceof SimpleS3Client) {
-            // Supports upload of files larger than 5GB
-            $this->client->upload($this->bucket, $key, $body, array_merge($options, ['ACL' => $acl]));
-        } else {
-            $this->client->putObject(array_merge($options, [
-                'Bucket' => $this->bucket,
-                'Key' => $key,
-                'Body' => $body,
-                'ACL' => $acl,
-            ]));
+        try {
+            if ($this->client instanceof SimpleS3Client) {
+                // Supports upload of files larger than 5GB
+                $this->client->upload($this->bucket, $key, $body, array_merge($options, ['ACL' => $acl]));
+            } else {
+                $this->client->putObject(array_merge($options, [
+                    'Bucket' => $this->bucket,
+                    'Key' => $key,
+                    'Body' => $body,
+                    'ACL' => $acl,
+                ]));
+            }
+        } catch (Throwable $exception) {
+            throw UnableToWriteFile::atLocation($path, $exception->getMessage(), $exception);
         }
     }
 
